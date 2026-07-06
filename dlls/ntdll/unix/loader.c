@@ -294,13 +294,22 @@ static WORD get_alt_machine( WORD machine )
 static void set_dll_path(void)
 {
     char *p, *path = getenv( "WINEDLLPATH" );
+#if defined(__APPLE__) && defined(__x86_64__)
+    char *d3dmetal_path = get_d3dmetal_dll_path();
+#endif
     int i, count = 0;
 
     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+#if defined(__APPLE__) && defined(__x86_64__)
+    if (d3dmetal_path) count++;
+#endif
 
     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
     count = 0;
 
+#if defined(__APPLE__) && defined(__x86_64__)
+    if (d3dmetal_path) dll_paths[count++] = d3dmetal_path;
+#endif
     if (!build_dir) dll_paths[count++] = dll_dir;
 
     if (path)
@@ -312,6 +321,11 @@ static void set_dll_path(void)
 
     for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
     dll_paths[count] = NULL;
+
+#if defined(__APPLE__) && defined(__x86_64__)
+    if (d3dmetal_path)
+        TRACE( "D3DMetal backend prepended DLL path %s\n", debugstr_a(d3dmetal_path) );
+#endif
 }
 
 
@@ -1005,6 +1019,104 @@ static NTSTATUS unwind_builtin_dll( void *args )
 
 #endif /* SO_DLLS_SUPPORTED */
 
+#if defined(__APPLE__) && defined(__x86_64__)
+static pthread_once_t d3dmetal_non_native_once = PTHREAD_ONCE_INIT;
+static void *d3dmetal_non_native_lib;
+void *libd3dshared_load_addr = NULL, *libd3dshared_code_end = NULL;
+static void (*register_non_native_code_region)( void *, void * );
+static BOOL (*supports_non_native_code_regions)(void);
+
+BOOL d3dmetal_graphics_backend_enabled(void)
+{
+    const char *backend = getenv( "GRAPHICS_BACKEND" );
+
+    if (!backend || !backend[0]) backend = getenv( "ACTIVE_GRAPHICS_BACKEND" );
+    return backend && !strcmp( backend, "d3dmetal" );
+}
+
+/* WineForge-Internal: d3dmetal-code-region-runtime-dir-v1. */
+static BOOL macos_supports_d3dmetal_code_regions(void)
+{
+    if (__builtin_available( macOS 14.0, * )) return TRUE;
+    return FALSE;
+}
+
+static char *try_d3dmetal_runtime_path( const char *runtime_dir, const char *relative_path )
+{
+    char *path;
+
+    if (!runtime_dir || !runtime_dir[0]) return NULL;
+    if (asprintf( &path, "%s/%s", runtime_dir, relative_path ) == -1) return NULL;
+    if (!access( path, R_OK )) return path;
+    free( path );
+    return NULL;
+}
+
+static char *resolve_libd3dshared_path(void)
+{
+    const char *runtime_dir = getenv( "D3DMETAL_RUNTIME_DIR" );
+    char *runtime_path;
+
+    if ((runtime_path = try_d3dmetal_runtime_path( runtime_dir, "external/libd3dshared.dylib" ))) return runtime_path;
+    if ((runtime_path = try_d3dmetal_runtime_path( runtime_dir, "libd3dshared.dylib" ))) return runtime_path;
+    return NULL;
+}
+
+static void init_d3dmetal_non_native_support(void)
+{
+    char *path;
+
+    if (!d3dmetal_graphics_backend_enabled() || !macos_supports_d3dmetal_code_regions()) return;
+
+    if (!(path = resolve_libd3dshared_path())) return;
+
+    d3dmetal_non_native_lib = dlopen( path, RTLD_LOCAL );
+    if (d3dmetal_non_native_lib)
+    {
+        Dl_info dli;
+
+        register_non_native_code_region = dlsym( d3dmetal_non_native_lib, "register_non_native_code_region" );
+        supports_non_native_code_regions = dlsym( d3dmetal_non_native_lib, "supports_non_native_code_regions" );
+
+        if (supports_non_native_code_regions && dladdr( supports_non_native_code_regions, &dli ))
+        {
+            unsigned long code_size = 0;
+
+            libd3dshared_load_addr = dli.dli_fbase;
+            libd3dshared_code_end = (char *)libd3dshared_load_addr + (getsegmentdata( dli.dli_fbase, "__TEXT", &code_size ) ? code_size : 0);
+        }
+
+        TRACE( "loaded libd3dshared.dylib from %s, non-native code regions %s\n",
+               debugstr_a(path),
+               supports_non_native_code_regions && supports_non_native_code_regions() ? "supported" : "not supported" );
+    }
+    else WARN( "failed to load libd3dshared.dylib from %s: %s\n", debugstr_a(path), dlerror() );
+
+    free( path );
+}
+
+/* CW HACK 22434 */
+static NTSTATUS pe_module_loaded( void *args )
+{
+    struct pe_module_loaded_params *params = args;
+
+    pthread_once( &d3dmetal_non_native_once, init_d3dmetal_non_native_support );
+    if (register_non_native_code_region && supports_non_native_code_regions && supports_non_native_code_regions())
+    {
+        TRACE( "registering non-native PE code region %p-%p\n", params->start, params->end );
+        register_non_native_code_region( params->start, params->end );
+        return STATUS_SUCCESS;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+#elif defined(__x86_64__)
+/* CW HACK 22434 */
+static NTSTATUS pe_module_loaded( void *args )
+{
+    return STATUS_NOT_SUPPORTED;
+}
+#endif
+
 
 static const unixlib_entry_t unix_call_funcs[] =
 {
@@ -1016,6 +1128,9 @@ static const unixlib_entry_t unix_call_funcs[] =
     unixcall_wine_server_handle_to_fd,
     unixcall_wine_spawnvp,
     system_time_precise,
+#if defined(__x86_64__)
+    pe_module_loaded,
+#endif
 };
 
 
@@ -1023,6 +1138,9 @@ static const unixlib_entry_t unix_call_funcs[] =
 
 static NTSTATUS wow64_load_so_dll( void *args ) { return STATUS_INVALID_IMAGE_FORMAT; }
 static NTSTATUS wow64_unwind_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
+#if defined(__x86_64__)
+static NTSTATUS wow64_pe_module_loaded( void *args ) { return STATUS_NOT_SUPPORTED; }
+#endif
 
 const unixlib_entry_t unix_call_wow64_funcs[] =
 {
@@ -1034,6 +1152,9 @@ const unixlib_entry_t unix_call_wow64_funcs[] =
     wow64_wine_server_handle_to_fd,
     wow64_wine_spawnvp,
     system_time_precise,
+#if defined(__x86_64__)
+    wow64_pe_module_loaded,
+#endif
 };
 
 #endif  /* _WIN64 */
@@ -1115,6 +1236,78 @@ static NTSTATUS open_builtin_pe_file( const char *name, OBJECT_ATTRIBUTES *attr,
     return status;
 }
 
+#if defined(__APPLE__) && defined(__x86_64__)
+/*
+ * WineForge launcher-compat: Steam CEF/native Vulkan gate.
+ * WineForge-Internal: launcher-compat/steam-cef-native-vulkan-v1.
+ */
+static BOOL unicode_string_contains_ascii_ci( const UNICODE_STRING *str, const char *needle )
+{
+    unsigned int i, j, len, needle_len;
+
+    if (!str || !str->Buffer || !needle) return FALSE;
+    len = str->Length / sizeof(WCHAR);
+    needle_len = strlen( needle );
+    if (!needle_len || needle_len > len) return FALSE;
+
+    for (i = 0; i <= len - needle_len; ++i)
+    {
+        for (j = 0; j < needle_len; ++j)
+        {
+            WCHAR wc = str->Buffer[i + j];
+            unsigned char ch = needle[j];
+
+            if (wc > 127) break;
+            if (wc >= 'A' && wc <= 'Z') wc += 'a' - 'A';
+            if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+            if (wc != ch) break;
+        }
+        if (j == needle_len) return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL ascii_string_contains_ci( const char *str, const char *needle )
+{
+    unsigned int i, j, len, needle_len;
+
+    if (!str || !needle) return FALSE;
+    len = strlen( str );
+    needle_len = strlen( needle );
+    if (!needle_len || needle_len > len) return FALSE;
+
+    for (i = 0; i <= len - needle_len; ++i)
+    {
+        for (j = 0; j < needle_len; ++j)
+        {
+            unsigned char ch = str[i + j];
+            unsigned char cmp = needle[j];
+
+            if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+            if (cmp >= 'A' && cmp <= 'Z') cmp += 'a' - 'A';
+            if (ch != cmp) break;
+        }
+        if (j == needle_len) return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL steam_cef_native_vulkan_loader( const UNICODE_STRING *nt_name, const char *module )
+{
+    if (!module || strcasecmp( module, "vulkan-1.dll" )) return FALSE;
+
+    return unicode_string_contains_ascii_ci( nt_name, "\\steam\\bin\\cef\\" ) ||
+           unicode_string_contains_ascii_ci( nt_name, "/steam/bin/cef/" );
+}
+
+static BOOL steam_cef_native_vulkan_loader_path( const char *path, const char *module )
+{
+    if (!module || strcasecmp( module, "vulkan-1.dll" )) return FALSE;
+    return ascii_string_contains_ci( path, "/steam/bin/cef/" ) ||
+           ascii_string_contains_ci( path, "\\steam\\bin\\cef\\" );
+}
+#endif
+
 
 /***********************************************************************
  *           find_builtin_dll
@@ -1132,6 +1325,9 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, ANSI_STRING *exp_name
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     BOOL found_image = FALSE;
+#if defined(__APPLE__) && defined(__x86_64__)
+    BOOL d3dmetal_runtime_pe = FALSE;
+#endif
 
     InitializeObjectAttributes( &attr, nt_name, 0, 0, NULL );
 
@@ -1177,6 +1373,15 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, ANSI_STRING *exp_name
 
     TRACE( "looking for %s for file %s\n", debugstr_a(file + pos + 1), debugstr_us(nt_name) );
 
+#if defined(__APPLE__) && defined(__x86_64__)
+    if (d3dmetal_graphics_backend_enabled() && steam_cef_native_vulkan_loader( nt_name, file + pos + 1 ))
+    {
+        TRACE( "D3DMetal Steam frontend using native CEF Vulkan loader for %s\n", debugstr_us(nt_name) );
+        status = STATUS_DLL_NOT_FOUND;
+        goto done;
+    }
+#endif
+
     if (build_dir)
     {
         /* try as a dll */
@@ -1200,11 +1405,43 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, ANSI_STRING *exp_name
         if (status != STATUS_DLL_NOT_FOUND) goto done;
     }
 
+#if defined(__APPLE__) && defined(__x86_64__)
+    if (d3dmetal_graphics_backend_enabled() && is_d3dmetal_module_name( file + pos + 1 ))
+    {
+        char *d3dmetal_pe = resolve_d3dmetal_pe_path( file + pos + 1 );
+
+        if (d3dmetal_pe)
+        {
+            status = open_builtin_pe_file( d3dmetal_pe, &attr, module, size_ptr, image_info,
+                                           limit_low, limit_high, load_machine, prefer_native, offset );
+            if (status != STATUS_DLL_NOT_FOUND)
+            {
+                TRACE( "D3DMetal runtime PE %s for %s -> %#lx\n",
+                       debugstr_a(d3dmetal_pe), debugstr_us(nt_name), (long)status );
+                free( d3dmetal_pe );
+                ptr = file + pos;
+                d3dmetal_runtime_pe = TRUE;
+                goto done;
+            }
+            free( d3dmetal_pe );
+        }
+    }
+#endif
+
     for (i = 0; dll_paths[i]; i++)
     {
         ptr = file + pos;
         ptr = prepend( ptr, pe_dir, strlen(pe_dir) );
         ptr = prepend( ptr, dll_paths[i], strlen(dll_paths[i]) );
+#if defined(__APPLE__) && defined(__x86_64__)
+        if (d3dmetal_graphics_backend_enabled() && steam_cef_native_vulkan_loader_path( ptr, file + pos + 1 ))
+        {
+            TRACE( "D3DMetal Steam frontend using native CEF Vulkan loader candidate %s for %s\n",
+                   debugstr_a(ptr), debugstr_us(nt_name) );
+            status = STATUS_DLL_NOT_FOUND;
+            goto done;
+        }
+#endif
         status = open_builtin_pe_file( ptr, &attr, module, size_ptr, image_info, limit_low, limit_high,
                                        load_machine, prefer_native, offset );
         /* use so dir for unix lib */
@@ -1235,8 +1472,35 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, ANSI_STRING *exp_name
 done:
     if (NT_SUCCESS(status) && ext)
     {
+        char *d3dmetal_unixlib = NULL;
+        const char *unixlib_path = ptr;
+
         strcpy( ext, ".so" );
-        set_builtin_unixlib_name( *module, ptr );
+#if defined(__APPLE__) && defined(__x86_64__)
+        if (is_d3dmetal_unixlib_name( ptr ))
+            d3dmetal_unixlib = resolve_d3dmetal_unixlib_path( ptr );
+        if (d3dmetal_unixlib) unixlib_path = d3dmetal_unixlib;
+#endif
+#if defined(__APPLE__) && defined(__x86_64__)
+        if (!d3dmetal_runtime_pe || d3dmetal_unixlib)
+#endif
+            set_builtin_unixlib_name( *module, unixlib_path );
+#if defined(__APPLE__) && defined(__x86_64__)
+        if (d3dmetal_graphics_backend_enabled() && is_d3dmetal_unixlib_name( unixlib_path ))
+        {
+            NTSTATUS unix_status;
+
+            if (access( unixlib_path, R_OK ))
+                TRACE( "d3dmetal unixlib %s not present for %s\n", debugstr_a(unixlib_path), debugstr_us(nt_name) );
+            else
+            {
+                unix_status = load_builtin_unixlib_now( *module );
+                TRACE( "d3dmetal immediate unixlib load %s for %s -> %#lx\n",
+                       debugstr_a(unixlib_path), debugstr_us(nt_name), (long)unix_status );
+            }
+        }
+        free( d3dmetal_unixlib );
+#endif
     }
     free( file );
     return status;
@@ -1849,6 +2113,49 @@ static ULONG_PTR get_image_address(void)
     return 0;
 }
 
+#if defined(__APPLE__) && defined(__x86_64__)
+static __thread struct tm d3dmetal_localtime_tls;
+
+static struct tm *d3dmetal_tls_localtime( const time_t *timep )
+{
+    return localtime_r( timep, &d3dmetal_localtime_tls );
+}
+
+static void d3dmetal_tls_hook_function( void *to_hook, const void *replace )
+{
+    size_t offset;
+    struct hooked_function
+    {
+        char jmp[8];
+        const void *dst;
+    } *hooked_function = to_hook;
+    ULONG_PTR page = (ULONG_PTR)to_hook;
+
+    page -= page % 4096;
+    mprotect( (void *)page, 0x2000, PROT_EXEC | PROT_READ | PROT_WRITE );
+
+    offset = offsetof( struct hooked_function, dst ) - offsetof( struct hooked_function, jmp ) - 0x6;
+
+    hooked_function->jmp[0] = 0xff;
+    hooked_function->jmp[1] = 0x25;
+    hooked_function->jmp[2] = offset;
+    hooked_function->jmp[3] = 0x00;
+    hooked_function->jmp[4] = 0x00;
+    hooked_function->jmp[5] = 0x00;
+    hooked_function->jmp[6] = 0xcc;
+    hooked_function->jmp[7] = 0xcc;
+    hooked_function->dst = replace;
+}
+
+static void init_d3dmetal_darwin_tls_hooks(void)
+{
+    /* CrossOver-derived behavior.
+     * This is necessary because we poke PEB into pthread TLS at offset 0x60. It is normally in use by
+     * localtime(), which is called a lot by system libraries. Make localtime() go away. */
+    d3dmetal_tls_hook_function( localtime, d3dmetal_tls_localtime );
+}
+#endif
+
 /***********************************************************************
  *           start_main_thread
  */
@@ -1869,6 +2176,9 @@ static void start_main_thread(void)
     load_ntdll();
     load_wow64_ntdll( main_image_info.Machine );
     load_apiset_dll();
+#if defined(__APPLE__) && defined(__x86_64__)
+    init_d3dmetal_darwin_tls_hooks();
+#endif
     server_init_process_done();
 }
 

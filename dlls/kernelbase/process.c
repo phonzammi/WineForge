@@ -505,6 +505,55 @@ done:
 /**********************************************************************
  *           CreateProcessInternalW   (kernelbase.@)
  */
+/* WineForge launcher-compat: Steam CEF software rendering gate. */
+static const WCHAR *get_steam_webhelper_append_args( const WCHAR *app_name, const WCHAR *cmd_line )
+{
+    static const WCHAR steamwebhelperW[] = L"steamwebhelper.exe";
+    static const WCHAR steam_cef_pathW[] = L"\\Steam\\bin\\cef\\";
+    static const WCHAR steam_cef_path_altW[] = L"/Steam/bin/cef/";
+    static const WCHAR crashpadW[] = L"--type=crashpad-handler";
+    static const WCHAR disable_gpuW[] = L"--disable-gpu";
+    static const WCHAR disable_gpu_argsW[] =
+        L" --no-sandbox"
+        L" --in-process-gpu"
+        L" --disable-gpu"
+        L" --disable-d3d11"
+        L" --enable-unsafe-swiftshader"
+        L" --use-gl=angle"
+        L" --use-angle=swiftshader";
+
+    if ((!app_name || !wcsstr( app_name, steamwebhelperW )) &&
+        (!cmd_line || !wcsstr( cmd_line, steamwebhelperW )))
+        return NULL;
+
+    if ((!app_name || (!wcsstr( app_name, steam_cef_pathW ) && !wcsstr( app_name, steam_cef_path_altW ))) &&
+        (!cmd_line || (!wcsstr( cmd_line, steam_cef_pathW ) && !wcsstr( cmd_line, steam_cef_path_altW ))))
+        return NULL;
+
+    if ((cmd_line && wcsstr( cmd_line, crashpadW )) ||
+        (cmd_line && wcsstr( cmd_line, disable_gpuW )))
+        return NULL;
+
+    return disable_gpu_argsW;
+}
+
+static BOOL append_process_args( WCHAR **cmd_line, const WCHAR *append )
+{
+    WCHAR *new_cmdline;
+    SIZE_T len;
+
+    if (!append) return TRUE;
+
+    len = lstrlenW( *cmd_line ) + lstrlenW( append ) + 1;
+    if (!(new_cmdline = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+        return FALSE;
+
+    lstrcpyW( new_cmdline, *cmd_line );
+    lstrcatW( new_cmdline, append );
+    *cmd_line = new_cmdline;
+    return TRUE;
+}
+
 BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR *app_name, WCHAR *cmd_line,
                                                       SECURITY_ATTRIBUTES *process_attr,
                                                       SECURITY_ATTRIBUTES *thread_attr,
@@ -518,6 +567,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info = { 0 };
     HANDLE parent = 0, debug = 0;
+    const WCHAR *append_args;
     ULONG nt_flags = 0;
     USHORT machine = 0;
     NTSTATUS status;
@@ -541,6 +591,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     {
         if (!(tidy_cmdline = get_file_name( cmd_line, name, ARRAY_SIZE(name) ))) return FALSE;
         app_name = name;
+    }
+
+    if ((append_args = get_steam_webhelper_append_args( app_name, tidy_cmdline )))
+    {
+        WCHAR *old_cmdline = tidy_cmdline;
+
+        WARN( "appending Steam webhelper software rendering arguments %s\n", debugstr_w(append_args) );
+        if (!append_process_args( &tidy_cmdline, append_args ))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        if (old_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, old_cmdline );
     }
 
     /* Warn if unsupported features are used */
