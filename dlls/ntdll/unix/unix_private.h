@@ -299,8 +299,6 @@ extern NTSTATUS send_debug_event( struct thread_data *data, EXCEPTION_RECORD *re
                                   CONTEXT *context, BOOL first_chance );
 extern NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USHORT machine );
 extern NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT machine );
-extern unsigned int alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
-                                             data_size_t *ret_len );
 extern NTSTATUS system_time_precise( void *args );
 
 extern void *anon_mmap_fixed( void *start, size_t size, int prot, int flags );
@@ -342,6 +340,13 @@ extern void virtual_enable_write_exceptions( BOOL enable );
 extern void virtual_fill_image_information( const struct pe_image_info *pe_info,
                                             SECTION_IMAGE_INFORMATION *info );
 extern void *get_builtin_so_handle( void *module );
+extern BOOL d3dmetal_graphics_backend_enabled(void);
+extern char *get_d3dmetal_dll_path(void);
+extern BOOL is_d3dmetal_module_name( const char *path );
+extern BOOL is_d3dmetal_unixlib_name( const char *path );
+extern char *resolve_d3dmetal_pe_path( const char *module );
+extern char *resolve_d3dmetal_unixlib_path( const char *path );
+extern NTSTATUS load_builtin_unixlib_now( void *module );
 extern NTSTATUS set_builtin_unixlib_name( void *module, const char *name );
 extern BOOL is_emulated_code( ULONG_PTR ptr );
 
@@ -641,6 +646,46 @@ static inline NTSTATUS map_section( HANDLE mapping, void **ptr, SIZE_T *size, UL
     return NtMapViewOfSection( mapping, NtCurrentProcess(), ptr, user_space_wow_limit,
                                0, NULL, size, ViewShare, 0, protect );
 }
+
+/*
+ * CX Hack 23015
+ * Local queue note: CrossOver uses GPT_* names for these helpers; this queue
+ * uses D3DMETAL_* names to keep the runtime path explicit.
+ * WineForge-Internal: d3dmetal-abi-wrapper-macros-v1.
+ */
+#if defined(__APPLE__) && defined(__x86_64__)
+#include "wine/asm.h"
+
+extern void *libd3dshared_load_addr, *libd3dshared_code_end;
+#define D3DMETAL_IMPORT_ATTR __attribute__((used)) __attribute__((visibility("default"))) __attribute__((ms_abi))
+
+#define D3DMETAL_ABI_WRAPPER(name, sysv_name, msabi_name) \
+    asm( ".text\n\t" \
+         ".align 4\n\t" \
+         ".globl " __ASM_NAME(#name) "\n\t" \
+         __ASM_NAME(#name) ":\n\t" \
+         "push %rax\n\t" \
+         "push %rcx\n\t" \
+         "movq " __ASM_NAME("libd3dshared_load_addr") "@GOTPCREL(%rip), %rax\n\t" \
+         "cmpq $0, (%rax)\n\t" \
+         "je " __ASM_LOCAL_LABEL("jmp_sysv_" #name) "\n\t" \
+         "movq 16(%rsp), %rcx\n\t" \
+         "cmpq (%rax), %rcx\n\t" \
+         "jb " __ASM_LOCAL_LABEL("jmp_sysv_" #name) "\n\t" \
+         "movq " __ASM_NAME("libd3dshared_code_end") "@GOTPCREL(%rip), %rax\n\t" \
+         "cmpq (%rax), %rcx\n\t" \
+         "ja " __ASM_LOCAL_LABEL("jmp_sysv_" #name) "\n\t" \
+         "pop %rcx\n\t" \
+         "pop %rax\n\t" \
+         "jmp " __ASM_NAME(#msabi_name) "\n\t" \
+         __ASM_LOCAL_LABEL("jmp_sysv_" #name) ":\n\t" \
+         "pop %rcx\n\t" \
+         "pop %rax\n\t" \
+         "jmp " __ASM_NAME(#sysv_name) "\n\t" );
+#else
+#define D3DMETAL_IMPORT_ATTR
+#define D3DMETAL_ABI_WRAPPER(name, sysv_name, msabi_name)
+#endif
 
 /* LDT definitions */
 

@@ -962,6 +962,9 @@ done:
 /******************************************************************************
  *              NtCreateSemaphore (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtCreateSemaphore d3dmetal_sysv_NtCreateSemaphore
+#endif
 NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                                    LONG initial, LONG max )
 {
@@ -990,6 +993,19 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
     free( objattr );
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtCreateSemaphore
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access,
+                                                                 const OBJECT_ATTRIBUTES *attr,
+                                                                 LONG initial, LONG max )
+{
+    return d3dmetal_sysv_NtCreateSemaphore( handle, access, attr, initial, max );
+}
+D3DMETAL_ABI_WRAPPER( NtCreateSemaphore, d3dmetal_sysv_NtCreateSemaphore, d3dmetal_import_NtCreateSemaphore );
+#endif
 
 
 /******************************************************************************
@@ -1062,6 +1078,9 @@ NTSTATUS WINAPI NtQuerySemaphore( HANDLE handle, SEMAPHORE_INFORMATION_CLASS cla
 /******************************************************************************
  *              NtReleaseSemaphore (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtReleaseSemaphore d3dmetal_sysv_NtReleaseSemaphore
+#endif
 NTSTATUS WINAPI NtReleaseSemaphore( HANDLE handle, LONG count, ULONG *previous )
 {
     unsigned int ret;
@@ -1086,11 +1105,25 @@ NTSTATUS WINAPI NtReleaseSemaphore( HANDLE handle, LONG count, ULONG *previous )
     SERVER_END_REQ;
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtReleaseSemaphore
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtReleaseSemaphore( HANDLE handle, LONG count, ULONG *previous )
+{
+    return d3dmetal_sysv_NtReleaseSemaphore( handle, count, previous );
+}
+D3DMETAL_ABI_WRAPPER( NtReleaseSemaphore, d3dmetal_sysv_NtReleaseSemaphore, d3dmetal_import_NtReleaseSemaphore );
+#endif
 
 
 /**************************************************************************
  *              NtCreateEvent (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtCreateEvent d3dmetal_sysv_NtCreateEvent
+#endif
 NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                                EVENT_TYPE type, BOOLEAN state )
 {
@@ -1119,6 +1152,19 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
     free( objattr );
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtCreateEvent
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtCreateEvent( HANDLE *handle, ACCESS_MASK access,
+                                                             const OBJECT_ATTRIBUTES *attr,
+                                                             EVENT_TYPE type, BOOLEAN state )
+{
+    return d3dmetal_sysv_NtCreateEvent( handle, access, attr, type, state );
+}
+D3DMETAL_ABI_WRAPPER( NtCreateEvent, d3dmetal_sysv_NtCreateEvent, d3dmetal_import_NtCreateEvent );
+#endif
 
 
 /******************************************************************************
@@ -1151,6 +1197,9 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
 /******************************************************************************
  *              NtSetEvent (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtSetEvent d3dmetal_sysv_NtSetEvent
+#endif
 NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
 {
     unsigned int ret;
@@ -1170,6 +1219,17 @@ NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
     SERVER_END_REQ;
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtSetEvent
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtSetEvent( HANDLE handle, LONG *prev_state )
+{
+    return d3dmetal_sysv_NtSetEvent( handle, prev_state );
+}
+D3DMETAL_ABI_WRAPPER( NtSetEvent, d3dmetal_sysv_NtSetEvent, d3dmetal_import_NtSetEvent );
+#endif
 
 
 /******************************************************************************
@@ -1184,6 +1244,9 @@ NTSTATUS WINAPI NtSetEventBoostPriority( HANDLE handle )
 /******************************************************************************
  *              NtResetEvent (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtResetEvent d3dmetal_sysv_NtResetEvent
+#endif
 NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
 {
     unsigned int ret;
@@ -1203,21 +1266,49 @@ NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
     SERVER_END_REQ;
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtResetEvent
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtResetEvent( HANDLE handle, LONG *prev_state )
+{
+    return d3dmetal_sysv_NtResetEvent( handle, prev_state );
+}
+D3DMETAL_ABI_WRAPPER( NtResetEvent, d3dmetal_sysv_NtResetEvent, d3dmetal_import_NtResetEvent );
+#endif
 
 
 /******************************************************************************
  *              NtClearEvent (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtClearEvent d3dmetal_sysv_NtClearEvent
+#endif
 NTSTATUS WINAPI NtClearEvent( HANDLE handle )
 {
     /* FIXME: same as NtResetEvent ??? */
     return NtResetEvent( handle, NULL );
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtClearEvent
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtClearEvent( HANDLE handle )
+{
+    return d3dmetal_sysv_NtClearEvent( handle );
+}
+D3DMETAL_ABI_WRAPPER( NtClearEvent, d3dmetal_sysv_NtClearEvent, d3dmetal_import_NtClearEvent );
+#endif
 
 
 /******************************************************************************
  *              NtPulseEvent (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtPulseEvent d3dmetal_sysv_NtPulseEvent
+#endif
 NTSTATUS WINAPI NtPulseEvent( HANDLE handle, LONG *prev_state )
 {
     unsigned int ret;
@@ -1237,6 +1328,17 @@ NTSTATUS WINAPI NtPulseEvent( HANDLE handle, LONG *prev_state )
     SERVER_END_REQ;
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtPulseEvent
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtPulseEvent( HANDLE handle, LONG *prev_state )
+{
+    return d3dmetal_sysv_NtPulseEvent( handle, prev_state );
+}
+D3DMETAL_ABI_WRAPPER( NtPulseEvent, d3dmetal_sysv_NtPulseEvent, d3dmetal_import_NtPulseEvent );
+#endif
 
 
 /******************************************************************************

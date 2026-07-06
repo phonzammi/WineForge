@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <string.h>
 
 #include "ntstatus.h"
 #include "windef.h"
@@ -39,10 +40,33 @@ struct thunk_32to64
     DWORD addr;
     WORD  cs;
 };
+struct thunk_32to64_rosetta
+{
+    BYTE  lcall;  /* call far, absolute indirect */
+    BYTE  modrm;  /* address=disp32, opcode=3 */
+    DWORD op;
+    DWORD addr;
+    WORD  cs;
+    BYTE  add;
+    BYTE  add_modrm;
+    BYTE  add_op;
+    BYTE  jmp;
+    BYTE  jmp_modrm;
+    DWORD jmp_op;
+    ULONG64 jmp_addr;
+};
 struct thunk_opcodes
 {
-    struct thunk_32to64 syscall_thunk;
-    struct thunk_32to64 unix_thunk;
+    union
+    {
+        struct thunk_32to64 syscall_thunk;
+        struct thunk_32to64_rosetta syscall_thunk_rosetta;
+    };
+    union
+    {
+        struct thunk_32to64 unix_thunk;
+        struct thunk_32to64_rosetta unix_thunk_rosetta;
+    };
 };
 #pragma pack(pop)
 
@@ -56,6 +80,16 @@ static USHORT ds64_sel;
 static USHORT fs32_sel;
 
 void **__wine_unix_call_dispatcher = NULL;
+
+BOOL use_rosetta2_workaround;
+
+static BOOL is_rosetta2(void)
+{
+    char buffer[64] = {0};
+    NTSTATUS status = NtQuerySystemInformation( SystemProcessorBrandString, buffer, sizeof(buffer), NULL );
+
+    return !status && strstr( buffer, "VirtualApple" );
+}
 
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, void *reserved )
 {
@@ -210,7 +244,17 @@ __ASM_GLOBAL_FUNC( syscall_32to64,
                    "movl %edx,4(%rsp)\n\t"
                    "movl 0xc4(%r13),%r14d\n\t"  /* context->Esp */
                    "xchgq %r14,%rsp\n\t"
-                   "ljmp *(%r14)\n"
+                   /* CW HACK 20760 */
+                   "cmpl $0, " __ASM_NAME("use_rosetta2_workaround") "\n\t"
+                   "jne syscall_32to64_rosetta2_return\n\t"
+                   "ljmp *(%r14)\n\t"
+                   "syscall_32to64_rosetta2_return:\n\t"
+                   "subq $0x10,%rsp\n\t"
+                   "movl 4(%r14),%edx\n\t"
+                   "movq %rdx,0x8(%rsp)\n\t"
+                   "movl (%r14),%edx\n\t"
+                   "movq %rdx,(%rsp)\n\t"
+                   "lretq\n"
                    ".Lsyscall_32to64_return:\n\t"
                    "movq %rsp,%r14\n\t"
                    "movl 0xa8(%r13),%edx\n\t"   /* context->Edx */
@@ -270,7 +314,17 @@ __ASM_GLOBAL_FUNC( unix_call_32to64,
                    "movl %edx,4(%rsp)\n\t"
                    "movl 0xc4(%r13),%r14d\n\t"  /* context->Esp */
                    "xchgq %r14,%rsp\n\t"
-                   "ljmp *(%r14)" )
+                   /* CW HACK 20760 */
+                   "cmpl $0, " __ASM_NAME("use_rosetta2_workaround") "\n\t"
+                   "jne unix_call_32to64_rosetta2_return\n\t"
+                   "ljmp *(%r14)\n\t"
+                   "unix_call_32to64_rosetta2_return:\n\t"
+                   "subq $0x10,%rsp\n\t"
+                   "movl 4(%r14),%edx\n\t"
+                   "movq %rdx,0x8(%rsp)\n\t"
+                   "movl (%r14),%edx\n\t"
+                   "movq %rdx,(%rsp)\n\t"
+                   "lretq" )
 
 
 /**********************************************************************
@@ -320,6 +374,7 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
     }
 
     wow64info->CpuFlags |= WOW64_CPUFLAGS_MSFT64;
+    use_rosetta2_workaround = is_rosetta2();
 
     LdrGetDllHandle( NULL, 0, &str, &module );
     p__wine_unix_call_dispatcher = RtlFindExportedRoutineByName( module, "__wine_unix_call_dispatcher" );
@@ -335,17 +390,55 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
     cs32_sel = context_i386.SegCs;
     ss32_sel = context_i386.SegSs;
 
-    thunk->syscall_thunk.ljmp  = 0xff;
-    thunk->syscall_thunk.modrm = 0x2d;
-    thunk->syscall_thunk.op    = PtrToUlong( &thunk->syscall_thunk.addr );
-    thunk->syscall_thunk.addr  = PtrToUlong( syscall_32to64 );
-    thunk->syscall_thunk.cs    = cs64_sel;
+    /* CW HACK 20760 */
+    if (use_rosetta2_workaround)
+    {
+        thunk->syscall_thunk_rosetta.lcall     = 0xff;
+        thunk->syscall_thunk_rosetta.modrm     = 0x1d;
+        thunk->syscall_thunk_rosetta.op        = PtrToUlong( &thunk->syscall_thunk_rosetta.addr );
+        thunk->syscall_thunk_rosetta.addr      = PtrToUlong( &thunk->syscall_thunk_rosetta.add );
+        thunk->syscall_thunk_rosetta.cs        = cs64_sel;
+        thunk->syscall_thunk_rosetta.add       = 0x83;
+        thunk->syscall_thunk_rosetta.add_modrm = 0xc4;
+        thunk->syscall_thunk_rosetta.add_op    = 0x08;
+        thunk->syscall_thunk_rosetta.jmp       = 0xff;
+        thunk->syscall_thunk_rosetta.jmp_modrm = 0x25;
+        thunk->syscall_thunk_rosetta.jmp_op    = 0x00;
+        thunk->syscall_thunk_rosetta.jmp_addr  = PtrToUlong( syscall_32to64 );
+    }
+    else
+    {
+        thunk->syscall_thunk.ljmp  = 0xff;
+        thunk->syscall_thunk.modrm = 0x2d;
+        thunk->syscall_thunk.op    = PtrToUlong( &thunk->syscall_thunk.addr );
+        thunk->syscall_thunk.addr  = PtrToUlong( syscall_32to64 );
+        thunk->syscall_thunk.cs    = cs64_sel;
+    }
 
-    thunk->unix_thunk.ljmp  = 0xff;
-    thunk->unix_thunk.modrm = 0x2d;
-    thunk->unix_thunk.op    = PtrToUlong( &thunk->unix_thunk.addr );
-    thunk->unix_thunk.addr  = PtrToUlong( unix_call_32to64 );
-    thunk->unix_thunk.cs    = cs64_sel;
+    /* CW HACK 20760 */
+    if (use_rosetta2_workaround)
+    {
+        thunk->unix_thunk_rosetta.lcall     = 0xff;
+        thunk->unix_thunk_rosetta.modrm     = 0x1d;
+        thunk->unix_thunk_rosetta.op        = PtrToUlong( &thunk->unix_thunk_rosetta.addr );
+        thunk->unix_thunk_rosetta.addr      = PtrToUlong( &thunk->unix_thunk_rosetta.add );
+        thunk->unix_thunk_rosetta.cs        = cs64_sel;
+        thunk->unix_thunk_rosetta.add       = 0x83;
+        thunk->unix_thunk_rosetta.add_modrm = 0xc4;
+        thunk->unix_thunk_rosetta.add_op    = 0x08;
+        thunk->unix_thunk_rosetta.jmp       = 0xff;
+        thunk->unix_thunk_rosetta.jmp_modrm = 0x25;
+        thunk->unix_thunk_rosetta.jmp_op    = 0x00;
+        thunk->unix_thunk_rosetta.jmp_addr  = PtrToUlong( unix_call_32to64 );
+    }
+    else
+    {
+        thunk->unix_thunk.ljmp  = 0xff;
+        thunk->unix_thunk.modrm = 0x2d;
+        thunk->unix_thunk.op    = PtrToUlong( &thunk->unix_thunk.addr );
+        thunk->unix_thunk.addr  = PtrToUlong( unix_call_32to64 );
+        thunk->unix_thunk.cs    = cs64_sel;
+    }
 
     NtProtectVirtualMemory( GetCurrentProcess(), (void **)&thunk, &size, PAGE_EXECUTE_READ, &old_prot );
     return STATUS_SUCCESS;

@@ -1125,6 +1125,17 @@ BOOL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
     {
         if (HIWORD(hkl) == layout->layout_id ? layout->layout_id : layout->lang)
         {
+            if (!is_ime_hkl(hkl))
+            {
+                /* WineForge internal: keep macOS input source selection user-controlled.
+                 * Some games request a US Windows keyboard layout and upstream winemac.drv
+                 * maps that to TISSelectInputSource(), which changes the global macOS
+                 * keyboard from e.g. Czech to U.S.  Ignore non-IME automatic layout
+                 * switches here; users can still switch the macOS input source manually. */
+                TRACE("not selecting macOS input source for hkl %p\n", hkl);
+                ret = TRUE;
+                break;
+            }
             if (macdrv_select_input_source(layout->input_source))
             {
                 ret = TRUE;
