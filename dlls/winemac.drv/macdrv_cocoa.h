@@ -257,6 +257,7 @@ extern void macdrv_free_monitors(struct macdrv_monitor* monitors, int monitor_co
 enum {
     APP_DEACTIVATED,
     APP_QUIT_REQUESTED,
+    CLIENT_SURFACE_PRESENTED, /* CW HACK 22435 */
     DISPLAYS_CHANGED,
     HOTKEY_PRESS,
     KEY_PRESS,
@@ -304,6 +305,10 @@ typedef struct macdrv_event {
         struct {
             int reason;
         }                                           app_quit_requested;
+        /* CW HACK 22435 */
+        struct {
+            void           *client_surface;
+        }                                           client_surface_presented;
         struct {
             bool activating;
         }                                           displays_changed;
@@ -551,5 +556,10 @@ extern void macdrv_destroy_status_item(WineStatusItem *item);
 extern void macdrv_set_status_item_image(WineStatusItem *item, CGImageRef cgimage);
 extern void macdrv_set_status_item_tooltip(WineStatusItem *item, CFStringRef cftip);
 
+
+/* CW HACK 22435 */
+extern void macdrv_client_surface_presented(const macdrv_event *event);
+extern void *macdrv_get_view_d3dmetal_client_surface(WineContentView *view);
+extern void macdrv_set_view_d3dmetal_client_surface(WineContentView *view, void *client_surface);
 
 #endif  /* __WINE_MACDRV_COCOA_H */

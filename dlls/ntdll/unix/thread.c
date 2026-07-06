@@ -1145,6 +1145,13 @@ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
     close( data->wait_fd[1] );
     close( data->reply_fd );
     close( data->request_fd );
+#if defined(__APPLE__) && defined(__x86_64__)
+    /* Avoid leaving Wine's PEB pointer in the macOS pthread-local slot. */
+    __asm__ volatile (".byte 0x65\n\tmovq %q0,%c1"
+                      :
+                      : "r" (NULL), "n" (FIELD_OFFSET(TEB, Peb)));
+#endif
+
     pthread_exit( UIntToPtr(status) );
 }
 
@@ -1408,6 +1415,9 @@ NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRI
 /***********************************************************************
  *              NtCreateThreadEx   (NTDLL.@)
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+#define NtCreateThreadEx d3dmetal_sysv_NtCreateThreadEx
+#endif
 NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
                                   HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
                                   ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
@@ -1488,6 +1498,23 @@ done:
     if (attr_list) status = update_attr_list( attr_list, *handle, &teb->ClientId, teb );
     return status;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtCreateThreadEx
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access,
+                                                                OBJECT_ATTRIBUTES *attr, HANDLE process,
+                                                                PRTL_THREAD_START_ROUTINE start, void *param,
+                                                                ULONG flags, ULONG_PTR zero_bits,
+                                                                SIZE_T stack_commit, SIZE_T stack_reserve,
+                                                                PS_ATTRIBUTE_LIST *attr_list )
+{
+    return d3dmetal_sysv_NtCreateThreadEx( handle, access, attr, process, start, param, flags,
+                                           zero_bits, stack_commit, stack_reserve, attr_list );
+}
+D3DMETAL_ABI_WRAPPER( NtCreateThreadEx, d3dmetal_sysv_NtCreateThreadEx, d3dmetal_import_NtCreateThreadEx );
+#endif
 
 
 /***********************************************************************
