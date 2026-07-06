@@ -876,6 +876,36 @@ static NTSTATUS load_builtin_unixlib( void *module, BOOL wow, const void **funcs
 
 
 /***********************************************************************
+ *           load_builtin_unixlib_now
+ *
+ * WineForge internal: force-load a redirected D3DMetal unixlib before
+ * the normal unix-call entrypoint lookup path runs.
+ */
+NTSTATUS load_builtin_unixlib_now( void *module )
+{
+    sigset_t sigset;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
+    struct builtin_module *builtin;
+
+    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
+    if ((builtin = get_builtin_module( module )))
+    {
+        if (builtin->unix_path && !builtin->unix_handle)
+        {
+            TRACE_(module)( "immediately loading unixlib %s for module %p\n",
+                            debugstr_a(builtin->unix_path), module );
+            builtin->unix_handle = dlopen( builtin->unix_path, RTLD_NOW );
+            if (!builtin->unix_handle)
+                WARN_(module)( "failed to load %s: %s\n", debugstr_a(builtin->unix_path), dlerror() );
+        }
+        if (builtin->unix_handle) status = STATUS_SUCCESS;
+    }
+    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    return status;
+}
+
+
+/***********************************************************************
  *           set_builtin_unixlib_name
  */
 NTSTATUS set_builtin_unixlib_name( void *module, const char *name )
@@ -4617,6 +4647,27 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec, 
         WARN( "treating read fault in a readable page as a write fault, addr %p\n", addr );
         err = EXCEPTION_WRITE_FAULT;
     }
+
+    /* CW Hack 24945 */
+    if (err == EXCEPTION_WRITE_FAULT &&
+        ((get_unix_prot( vprot ) & (PROT_WRITE | PROT_EXEC)) == (PROT_WRITE | PROT_EXEC)))
+    {
+        FIXME( "write fault on a writable executable page, addr %p\n", addr );
+        mprotect_range( page, page_size, 0, VPROT_EXEC );
+        mprotect_range( page, page_size, VPROT_EXEC, 0 );
+        ret = STATUS_SUCCESS;
+        goto done;
+    }
+
+    /* CW Hack 25719 */
+    if (err == EXCEPTION_EXECUTE_FAULT && (get_unix_prot( vprot ) & PROT_EXEC))
+    {
+        FIXME( "execute fault on an executable page, addr %p\n", addr );
+        mprotect_range( page, page_size, 0, VPROT_EXEC );
+        mprotect_range( page, page_size, VPROT_EXEC, 0 );
+        ret = STATUS_SUCCESS;
+        goto done;
+    }
 #endif
 
     if (!is_inside_signal_stack( data, stack ) && (vprot & VPROT_GUARD))
@@ -4653,6 +4704,9 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec, 
                 ret = STATUS_SUCCESS;
         }
     }
+#ifdef __APPLE__
+done:
+#endif
     mutex_unlock( &virtual_mutex );
     rec->ExceptionCode = ret;
     return ret;
@@ -6813,6 +6867,55 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
     return status;
 }
 
+#ifdef __APPLE__
+static int is_process_translated(void)
+{
+    static int translated_status, did_check;
+
+    if (!did_check)
+    {
+        int ret = 0;
+        size_t size = sizeof(ret);
+
+        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
+            translated_status = 0;
+        else
+            translated_status = ret;
+
+        did_check = 1;
+    }
+
+    return translated_status;
+}
+
+/* CW HACK 18947
+ * If mach_vm_write() is used to modify code cross-process (which is how we implement
+ * NtWriteVirtualMemory), Rosetta won't notice the change and will execute the "old" code.
+ *
+ * To work around this, after the write completes,
+ * toggle the executable bit (from inside the target process) on/off for any executable
+ * pages that were modified, to force Rosetta to re-translate it.
+ */
+static void refresh_rosetta_code_translation( HANDLE process, void *addr, SIZE_T size )
+{
+    MEMORY_BASIC_INFORMATION info;
+    NTSTATUS status;
+    SIZE_T ret;
+
+    if (!is_process_translated()) return;
+
+    status = NtQueryVirtualMemory( process, addr, MemoryBasicInformation, &info, sizeof(info), &ret );
+    if (!status && (info.AllocationProtect & 0xf0))
+    {
+        DWORD origprot, noexec = info.AllocationProtect & ~0xf0;
+
+        if (!noexec) noexec = PAGE_NOACCESS;
+        NtProtectVirtualMemory( process, &addr, &size, noexec, &origprot );
+        NtProtectVirtualMemory( process, &addr, &size, origprot, &noexec );
+    }
+}
+#endif
+
 
 /***********************************************************************
  *             NtWriteVirtualMemory   (NTDLL.@)
@@ -6834,6 +6937,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
             size = reply->written;
         }
         SERVER_END_REQ;
+#ifdef __APPLE__
+        /* WineForge internal: refresh only after a successful remote write. */
+        if (!status) refresh_rosetta_code_translation( process, addr, size );
+#endif
     }
     else
     {

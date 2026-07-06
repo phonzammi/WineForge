@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <string.h>
 
 #include "ntstatus.h"
 #include "windef.h"
@@ -795,6 +796,18 @@ NTSTATUS WINAPI wow64_NtSetLdtEntries( UINT *args )
     ULONG sel2 = get_ulong( &args );
     ULONG entry2_low = get_ulong( &args );
     ULONG entry2_high = get_ulong( &args );
+
+    /* CW Hack 26470 & 26456: Rosetta hangs when setting 16-bit LDT entries. */
+    {
+        char buffer[64] = {0};
+        NTSTATUS status = NtQuerySystemInformation( SystemProcessorBrandString, buffer, sizeof(buffer), NULL );
+
+        if (!status && strstr( buffer, "VirtualApple" ))
+        {
+            ERR("Refusing to set LDT entries under Rosetta.\n");
+            return STATUS_NOT_IMPLEMENTED;
+        }
+    }
 
     return NtSetLdtEntries( sel1, entry1_low, entry1_high, sel2, entry2_low, entry2_high );
 }
