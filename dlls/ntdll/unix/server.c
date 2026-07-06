@@ -1942,6 +1942,10 @@ NTSTATUS WINAPI NtCompareTokens( HANDLE first, HANDLE second, BOOLEAN *equal )
 /**************************************************************************
  *           NtClose
  */
+#if defined(__APPLE__) && defined(__x86_64__)
+/* WineForge-Internal: d3dmetal-abi-wrapper-entrypoints-v1. */
+#define NtClose d3dmetal_sysv_NtClose
+#endif
 NTSTATUS WINAPI NtClose( HANDLE handle )
 {
     sigset_t sigset;
@@ -1983,6 +1987,17 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     }
     return ret;
 }
+#if defined(__APPLE__) && defined(__x86_64__)
+#undef NtClose
+#endif
+
+#if defined(__APPLE__) && defined(__x86_64__)
+NTSTATUS D3DMETAL_IMPORT_ATTR d3dmetal_import_NtClose( HANDLE handle )
+{
+    return d3dmetal_sysv_NtClose( handle );
+}
+D3DMETAL_ABI_WRAPPER( NtClose, d3dmetal_sysv_NtClose, d3dmetal_import_NtClose );
+#endif
 
 #ifdef _WIN64
 

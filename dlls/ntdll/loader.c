@@ -2339,6 +2339,15 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
     TRACE_(loaddll)( "Loaded %s at %p: %s\n", debugstr_w(wm->ldr.FullDllName.Buffer), *module,
                      is_builtin ? "builtin" : "native" );
 
+#if defined(__x86_64__)
+    /* CW HACK 22434 */
+    if (!is_builtin)
+    {
+        struct pe_module_loaded_params params = { *module, (char *)*module + map_size };
+        WINE_UNIX_CALL( unix_pe_module_loaded, &params );
+    }
+#endif
+
     wm->ldr.LoadCount = 1;
     *pwm = wm;
     *module = NULL;
@@ -3405,6 +3414,14 @@ NTSTATUS WINAPI __wine_ctrl_routine( void *arg )
 {
     DWORD ret = pCtrlRoutine ? pCtrlRoutine( arg ) : 0;
     RtlExitUserThread( ret );
+}
+
+/*
+ * CW HACK 22435: Needed by D3DMetal PE DLLs
+ */
+NTSTATUS WINAPI __wine_unix_call_exported( unixlib_handle_t handle, unsigned int code, void *args )
+{
+    return __wine_unix_call( handle, code, args );
 }
 
 
