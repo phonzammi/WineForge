@@ -501,6 +501,8 @@ extern void macdrv_dispose_view(WineContentView *view);
 extern void macdrv_set_view_frame(WineContentView *view, CGRect rect);
 extern void macdrv_set_view_superview(WineContentView *view, WineContentView *parent, WineWindow *window, WineContentView *prev, WineContentView *next);
 extern void macdrv_set_view_hidden(WineContentView *view, bool hidden);
+extern void macdrv_set_view_metal_hidden(WineContentView *view, bool hidden);
+extern void macdrv_set_view_metal_exclusion_rect(WineContentView *view, CGRect rect);
 extern void macdrv_add_view_opengl_context(WineContentView *view, WineOpenGLContext *context);
 extern void macdrv_remove_view_opengl_context(WineContentView *view, WineOpenGLContext *context);
 extern MTLDevice_id macdrv_create_metal_device(void);
