@@ -52,7 +52,6 @@ SOURCES = \
 	unix/alpc.c \
 	unix/debug.c \
 	unix/d3dmetal_loader.c \
-	unix/dxmt_loader.c \
 	unix/env.c \
 	unix/file.c \
 	unix/loader.c \
