@@ -1012,7 +1012,7 @@ enum process_graphics_backend
 static enum process_graphics_backend process_graphics_backend;
 static BOOL process_uses_cef_software;
 static BOOL process_uses_wfdx_launchers;
-static BOOL process_uses_battlenet_dxmt;
+static BOOL process_uses_launcher_dxmt;
 static BOOL process_uses_battlenet_cef_cow;
 
 static BOOL parse_graphics_backend( const char *name, enum process_graphics_backend *backend )
@@ -1062,9 +1062,16 @@ static const char *const rockstar_launcher_app_paths[] =
     "\\rockstar games\\social club\\socialclubhelper.exe",
 };
 
-static const char *const battlenet_launcher_app_paths[] =
+struct dxmt_launcher_policy
 {
-    "\\program files (x86)\\battle.net\\battle.net.exe",
+    const char *path;
+    const char *required_argument;
+};
+
+static const struct dxmt_launcher_policy dxmt_launcher_policies[] =
+{
+    { "\\program files (x86)\\battle.net\\battle.net.exe", NULL },
+    { "\\program files (x86)\\ubisoft\\ubisoft game launcher\\upc.exe", "--in-process-gpu" },
 };
 
 static BOOL is_launcher_app( const char *image_path, const char *const *paths, unsigned int count )
@@ -1096,6 +1103,21 @@ static BOOL wargv_has_ascii_argument_ci( const char *argument )
             if (left != right) break;
         }
         if (!*wide && !*ascii) return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL is_dxmt_launcher_app( const char *image_path )
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(dxmt_launcher_policies); i++)
+    {
+        const struct dxmt_launcher_policy *policy = &dxmt_launcher_policies[i];
+
+        if (!ascii_path_ends_with_ci( image_path, policy->path )) continue;
+        if (!policy->required_argument || wargv_has_ascii_argument_ci( policy->required_argument ))
+            return TRUE;
     }
     return FALSE;
 }
@@ -1155,12 +1177,9 @@ static void init_process_graphics_backend( const WCHAR *image_path )
         ascii_path_ends_with_ci( image_pathA, "\\program files (x86)\\battle.net\\battle.net.exe" ) &&
         wargv_has_ascii_argument_ci( "--type=renderer" );
 
-    /* WineForge-Internal: launcher-compat/battlenet-dxmt-policy-v1. */
-    process_uses_battlenet_dxmt =
-        is_launcher_app( image_pathA, battlenet_launcher_app_paths,
-                         ARRAY_SIZE(battlenet_launcher_app_paths) ) &&
-        dxmt_runtime_available();
-    if (process_uses_battlenet_dxmt)
+    /* WineForge-Internal: launcher-compat/dxmt-cef-launcher-policy-v1. */
+    process_uses_launcher_dxmt = is_dxmt_launcher_app( image_pathA ) && dxmt_runtime_available();
+    if (process_uses_launcher_dxmt)
         process_graphics_backend = PROCESS_GRAPHICS_BACKEND_DXMT;
 
     /* WineForge-Internal: wfdxcompat/rockstar-launcher-policy-v1. */
@@ -1179,7 +1198,7 @@ static void init_process_graphics_backend( const WCHAR *image_path )
            backend && backend[0] ? backend : "wine",
            process_graphics_backend_name( process_graphics_backend ),
            process_uses_cef_software ? "cef-software" : "default",
-           process_uses_battlenet_dxmt ? ",battlenet-dxmt" : "",
+           process_uses_launcher_dxmt ? ",launcher-dxmt" : "",
            process_uses_wfdx_launchers ? ",wfdx-launchers" : "" );
 }
 
