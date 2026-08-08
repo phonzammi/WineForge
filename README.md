@@ -227,13 +227,17 @@ Launcher compatibility is tested as part of the WineForge game-focused runtime p
 
 ### Steam
 
-Steam is supported for storefront, library, download, and game launch workflows. Steam overlay inside games is currently not supported in this tree.
+Steam is supported for storefront, library, download, and game launch workflows. The source includes scoped D3DMetal overlay compatibility for the verified DXGI module load orders.
 
 ### Epic Games Launcher
 
 Epic Games Launcher is supported for storefront, download, install, and game launch workflows.
 
 Known issue: opening the Friends/social panel can show a black surface in the Store UI. The launcher otherwise remains functional. This appears tied to Epic's accelerated browser surface; WineForge does not currently have a reliable launcher-side switch to disable that GPU acceleration path.
+
+### EA App
+
+EA App is supported for installation, sign-in, library, download, and game launch workflows.
 
 ### Rockstar Games Launcher
 
@@ -242,6 +246,14 @@ Rockstar Games Launcher and Social Club are supported for installation, updates,
 Selected Rockstar launcher processes use the
 [WFDXCompat](https://github.com/Alien4042x/WFDXCompat) D3D11 companion with
 D3DMetal, while the launched game keeps the configured global graphics backend.
+
+### Battle.net
+
+Battle.net is supported for installation, sign-in, library, download, and game launch workflows. Diablo II: Resurrected and Diablo IV have been validated.
+
+### Ubisoft Connect
+
+Ubisoft Connect is supported for installation, sign-in, library, download, and game launch workflows.
 
 ## WFUSync
 
