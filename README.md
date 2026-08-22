@@ -274,7 +274,7 @@ Unsupported waits and sensitive synchronization semantics remain on the Wine ser
 
 ## Status
 
-This is an experimental WineForge source tree focused on local testing and reproducible macOS gaming builds.
+WineForge 0.6.0.3 is the current stable WineForge release line for tested macOS gaming workflows.
 
 Some games and launchers work, while others still need profiling or targeted compatibility work. Some compatibility patches currently prioritize functionality and testing while the implementation continues to evolve.
 
