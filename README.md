@@ -10,6 +10,8 @@ WineForge is a macOS-focused Wine 11.19 source tree focused on improving Windows
 
 It is built around one idea: keep the Wine side understandable while making the Apple Game Porting Toolkit / D3DMetal runtime path easier to test for Windows games on macOS.
 
+For users who do not want to configure Wine manually, the packaged [WineForge release](https://github.com/Alien4042x/WineForge/releases) includes the WineForge Launcher, a convenient graphical interface for managing bottles, game launchers, installed games, and runtime settings.
+
 This repository is not upstream Wine, not CrossOver, and not a complete runtime bundle. It is a prepared Wine source tree with a focused patch set.
 
 Current build identity:
