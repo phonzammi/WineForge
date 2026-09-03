@@ -1791,3 +1791,6 @@
 @ cdecl wine_get_version()
 @ cdecl wine_get_build_id()
 @ cdecl wine_get_host_version(ptr ptr)
+
+# WineForge-Internal: wfdxcompat/d3d10-late-device-dispatch-v1.
+@ stdcall -private __wine_get_wfdx_d3d10_create_device()
