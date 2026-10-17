@@ -59,7 +59,7 @@ The native Steam integration adapts components from [NotProton](https://github.c
 
 The native Steam hook, Metal overlay shim and client profiles are maintained separately in [WineForge-Steam](https://github.com/Alien4042x/WineForge-Steam). A compatible host application owns installation, per-game settings and environments. Building Wine alone does not install the native connection.
 
-The accepted reference uses Wine 11.19 with x86_64 and 32-bit WoW64. Both API architectures and their actual mapped libraries passed a connected control on 2026-10-14. Game rendering, overlay behavior and anti-cheat compatibility are separate validation gates.
+The accepted reference uses Wine 11.20 with x86_64 and 32-bit WoW64. Both API architectures and their actual mapped libraries passed a connected control on 2026-10-17. Game rendering, overlay behavior and anti-cheat compatibility are separate validation gates.
 
 See [the Wine-side integration contract](docs/NATIVE_STEAM.md) for build targets, runtime layout and source provenance.
 
@@ -293,9 +293,9 @@ Unsupported waits and sensitive synchronization semantics remain on the Wine ser
 
 ## Status
 
-WineForge 0.6.0.8 is the current stable WineForge release line for tested macOS gaming workflows.
+WineForge 0.6.0.8 uses Wine 11.21. The source has been built and installed. Focused checks of the signed runtime passed for native Steam API access in both architectures and Epic Games Launcher's 20.2.1 to 20.3.5 self-update.
 
-Compatibility remains application-specific. Unsupported games and launchers may still require profiling or targeted compatibility patches, but this does not change the release status of the tested WineForge runtime.
+Compatibility remains application-specific. Unsupported games and launchers may still require profiling or targeted compatibility patches.
 
 ## License
 
