@@ -14,11 +14,24 @@ It is built around one idea: keep the Wine side understandable while making the 
 
 This repository is not upstream Wine, not CrossOver, and not a complete runtime bundle. It is a prepared Wine source tree with a focused patch set.
 
-Current build identity:
+Source identity:
 
 ```text
 wine-11.21 (WineForge 0.6.0.8)
 ```
+
+## Native macOS fullscreen
+
+WineForge's native fullscreen integration requires **macOS 27 Golden Gate or
+later** and a build made with the **macOS 27 SDK or later**. It manages eligible
+borderless fullscreen windows, Dock and menu-bar visibility, screen-corner
+interactions and existing cursor confinement.
+
+On earlier macOS versions, or when built with an older SDK, Wine keeps its
+existing fullscreen handling. These requirements apply to this native
+fullscreen feature.
+
+See [Fullscreen support](docs/FULLSCREEN.md) for behavior and validation limits.
 
 ## Credits
 
